@@ -1,0 +1,30 @@
+@import "Layout";
+
+.cross {
+  padding: @padding;
+  /*background-color: @component-background;*/
+  :global {
+    .cross {
+      &-title {
+        text-align: center;
+        font-size: @font-size-base + 4px;
+        font-weight: bold;
+      }
+      &-left, &-right {
+        position: relative;
+        overflow: auto;
+        height: 100%;
+      }
+      &-left {
+        float: left;
+        border-right: @border-line;
+      }
+      &-right {
+        float: right;
+      }
+      &-part-top {
+        border-bottom: @border-line;
+      }
+    }
+  }
+}

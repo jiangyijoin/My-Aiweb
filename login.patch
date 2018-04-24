@@ -1,0 +1,583 @@
+diff --git a/package.json b/package.json
+index 1ec5002..4448f7c 100644
+--- a/package.json
++++ b/package.json
+@@ -3,7 +3,7 @@
+   "name": "firebrand-admin",
+   "version": "4.3.6",
+   "dependencies": {
+-    "antd": "^2.11.2",
++    "antd": "^3.0.0",
+     "axios": "^0.16.2",
+     "babel-polyfill": "^6.23.0",
+     "classnames": "^2.2.5",
+diff --git a/src/models/common/app.js b/src/models/common/app.js
+index 03b4a10..1f2a737 100644
+--- a/src/models/common/app.js
++++ b/src/models/common/app.js
+@@ -2,18 +2,18 @@
+ /* global document */
+ /* global location */
+ import { routerRedux } from 'dva/router'
+-import { parse } from 'qs'
++import qs from 'qs'
+ import config from 'config'
+ import { EnumRoleType } from 'enums'
+-import { query, logout } from 'services/common/app'
++import * as svc from 'services/common/app'
+ import * as menusService from 'services/common/menus'
+-import queryString from 'query-string'
+ import {firstLetterSort} from 'utils'
+ import modelExtend from 'dva-model-extend'
+ import {configModel} from 'models/common/common';
+ import { getSystemConfig } from 'utils/sysconfig'
+-const { prefix } = config
+-
++import url from 'utils/url'
++const { prefix, sso:{loginUrl: loginUrl, logoutUrl: logoutUrl, enable:SSOEnable} } = config;
++const { query, user : userToken } = svc;
+ export default modelExtend(configModel, {
+   namespace: 'app',
+   state: {
+@@ -47,26 +47,26 @@ export default modelExtend(configModel, {
+           type: 'updateState',
+           payload: {
+             locationPathname: location.pathname,
+-            locationQuery: queryString.parse(location.search),
++            locationQuery: qs.parse(location.search, { ignoreQueryPrefix: true }),
+           },
+-        })
++        });
+         dispatch({
+           type: 'writeHistory',
+           payload: {
+             locationPathname: location.pathname,
+-            locationQuery: queryString.parse(location.search),
++            locationQuery: qs.parse(location.search, { ignoreQueryPrefix: true }),
+           },
+         })
+       })
+     },
+     setup ({ dispatch }) {
+       // dispatch({type: 'queryDefConfig', payload: {force: true}})
++      dispatch({ type: 'query' })
+       getSystemConfig(function (data) {
+         console.log(`刷新系统数据缓存 ${JSON.stringify(data)}`)
+         dispatch({ type: 'configSuccess', payload: data})
+       }, null, true);
+-      dispatch({ type: 'query' })
+-      let tid
++      let tid;
+       window.onresize = () => {
+         clearTimeout(tid)
+         tid = setTimeout(() => {
+@@ -80,114 +80,113 @@ export default modelExtend(configModel, {
+     * query ({
+       payload,
+     }, { call, put, select }) {
+-      const { locationPathname } = yield select(_ => _.app)
+-      let pl = Object.assign({}, payload), hasUser = false;
+-      if(!payload){
+-        const user = window.sessionStorage.getItem("user");
+-        if(!!user){
+-          pl = Object.assign({}, JSON.parse(user));
+-          hasUser = true;
+-        }
+-        console.log(locationPathname);
+-        if(locationPathname == '/department'){
+-          return ;
+-        }
+-        if(!user || !pl.authorization){
+-          console.log("user:"+user+" pl.auth:"+pl.authorization);
+-          yield put(routerRedux.push({
+-            pathname: '/login',
+-            search: queryString.stringify({
+-              from: locationPathname,
+-            }),
+-          }))
+-          return;
+-        }
+-      }
++      const { locationPathname, locationQuery:{token} } = yield select(_ => _.app)
+
+-      const user = { 'username' : (!pl) ? "unknown" : pl.username , 'authorization': pl.auth };
+-      if(!hasUser){
+-        window.sessionStorage.setItem("user", JSON.stringify(user));
++      //如果是SSO登陆，获取token，根据token查找用户，写入session
++      if(token && SSOEnable){
++        yield put({type: 'tokenSet',payload: token});
++        //清理token后缀
++        yield put(routerRedux.push({
++          pathname: locationPathname,
++        }))
++        return ;
+       }
+-      const userResult = yield call(query, {'username' : pl.username})
+-      if (userResult.code==1000 && userResult.data) {
+-        let { data } = yield call(menusService.query)
+-        const permissions = {
+-          visit: userResult.data.map((item) => {return item.id;}),
+-          role: EnumRoleType.DEFAULT,
+-        };
+-        const findFirstLitterFn = (obj)=>{
+-          if(obj.route&& obj.name){
+-            return obj.name.substr(0,1).toLowerCase();
+-          }else{
+-            return "*";
+-          }
+-        };
+-        // 真实
+-        let list = data.map((item) => {
+-          return {
+-            id: item.id,
+-            name: item.nameCn,
+-            route: item.url,
+-            mpid: item.parentId,
+-            bpid: item.parentId,
+-            order: item.order
+-          }
+-        });
+-        let letterMenu = firstLetterSort(list.filter(_ => _.mpid !== '-1'), findFirstLitterFn);
+-        list = list.sort((item1, item2) => {
+-          return item1.order > item2.order
+-        });
+-        let menu = list;
+-        if (permissions.role === EnumRoleType.ADMIN || permissions.role === EnumRoleType.DEVELOPER) {
+-          permissions.visit = list.map(item => item.id)
+-        } else {
+-          menu = list.filter((item) => {
+-            const cases = [
+-              permissions.visit.includes(item.id),
+-              item.mpid ? permissions.visit.includes(item.mpid) || item.mpid === '-1' : true,
+-              item.bpid ? permissions.visit.includes(item.bpid) : true,
+-            ]
+-            return cases.every(_ => _)
++      //判断是否需要登陆
++      const pl = yield put({type: 'login'});
++      //获取菜单等登陆后信息操作
++      try{
++        const userResult = yield call(query, {'username' : pl.username})
++        if (userResult.code==1000 && userResult.data) {
++          let { data } = yield call(menusService.query)
++          const permissions = {
++            visit: userResult.data.map((item) => {return item.id;}),
++            role: EnumRoleType.DEFAULT,
++          };
++          const findFirstLitterFn = (obj)=>{
++            if(obj.route&& obj.name){
++              return obj.name.substr(0,1).toLowerCase();
++            }else{
++              return "*";
++            }
++          };
++          // 真实
++          let list = data.map((item) => {
++            return {
++              id: item.id,
++              name: item.nameCn,
++              route: item.url,
++              mpid: item.parentId,
++              bpid: item.parentId,
++              order: item.order
++            }
++          });
++          let letterMenu = firstLetterSort(list.filter(_ => _.mpid !== '-1'), findFirstLitterFn);
++          list = list.sort((item1, item2) => {
++            return item1.order > item2.order
+           });
+-          //创建字母顺序js列表
+-          letterMenu = firstLetterSort(menu.filter(_ => _.mpid !== '-1'), findFirstLitterFn);
++          let menu = list;
++          if (permissions.role === EnumRoleType.ADMIN || permissions.role === EnumRoleType.DEVELOPER) {
++            permissions.visit = list.map(item => item.id)
++          } else {
++            menu = list.filter((item) => {
++              const cases = [
++                permissions.visit.includes(item.id),
++                item.mpid ? permissions.visit.includes(item.mpid) || item.mpid === '-1' : true,
++                item.bpid ? permissions.visit.includes(item.bpid) : true,
++              ]
++              return cases.every(_ => _)
++            });
++            //创建字母顺序js列表
++            letterMenu = firstLetterSort(menu.filter(_ => _.mpid !== '-1'), findFirstLitterFn);
++          }
++          yield put({
++            type: 'updateState',
++            payload: {
++              user,
++              permissions,
++              menu,
++              letterMenu
++            },
++          })
++        } else if (config.openPages && config.openPages.indexOf(locationPathname) < 0) {
++          console.log("config.openPages:"+config.openPages +" config.openPages.indexOf(locationPathname)"+config.openPages.indexOf(locationPathname))
++          url.redirect(loginUrl, {serviceUrl: window.location.href});
+         }
+-        yield put({
+-          type: 'updateState',
+-          payload: {
+-            user,
+-            permissions,
+-            menu,
+-            letterMenu
+-          },
+-        })
+-        if (location.pathname === '/login') {
+-          yield put(routerRedux.push({
+-            pathname: '/dashboard',
+-          }))
++      }catch(e){
++        if(e.statusCode===401){
++          yield put({type:'login'});
++          return;
+         }
+-      } else if (config.openPages && config.openPages.indexOf(locationPathname) < 0) {
+-        console.log("config.openPages:"+config.openPages +" config.openPages.indexOf(locationPathname)"+config.openPages.indexOf(locationPathname))
+-        yield put(routerRedux.push({
+-          pathname: '/login',
+-          search: queryString.stringify({
+-            from: locationPathname,
+-          }),
+-        }))
+       }
+
+     },
+-
+-    * logout ({
+-      payload,
+-    }, { call, put }) {
+-      const data = yield call(logout, parse(payload))
+-      if (data.success) {
+-        yield put({ type: 'query' })
+-      } else {
+-        throw (data)
++    * login ({payload}, { call, put }){
++      const user = window.sessionStorage.getItem("user");
++      const pl = {};
++      user&&Object.assign(pl, JSON.parse(user));
++      //如果没有用户信息，单点登录跳转单点登录页面，普通登陆跳转login
++      if(!user || !pl.auth) {
++        if (SSOEnable) {
++          url.redirect(loginUrl, {serviceUrl: window.location.href});
++        }
++      }
++      return user;
++    },
++    * tokenSet ({payload}, { call, put }){
++      window.sessionStorage.setItem("user", JSON.stringify({'auth':payload}));
++      try{
++        const data = yield call(userToken, payload);
++        window.sessionStorage.setItem("user", JSON.stringify({"username":data.data, "auth":payload}));
++      }catch(e){
++        console.log(`ERROR ${e}`)
++        window.sessionStorage.removeItem("user");
++        yield put({type: 'query'})
+       }
+     },
++    * logout ({payload}, { call, put }) {
++      window.sessionStorage.removeItem("user");
++      url.redirect(logoutUrl, {serviceUrl: window.location.href});
++    },
+
+     * changeNavbar (action, { put, select }) {
+       const { app } = yield (select(_ => _))
+diff --git a/src/models/common/login.js b/src/models/common/login.js
+deleted file mode 100644
+index 3ed6305..0000000
+--- a/src/models/common/login.js
++++ /dev/null
+@@ -1,29 +0,0 @@
+-import { routerRedux } from 'dva/router'
+-import { login } from 'services/common/login'
+-
+-export default {
+-  namespace: 'login',
+-
+-  state: {},
+-
+-  effects: {
+-    * login ({
+-      payload,
+-    }, { put, call, select }) {
+-      const data = yield call(login, payload)
+-      const { locationQuery } = yield select(_ => _.app)
+-      if (data.code === 1000) {
+-        const { from } = locationQuery
+-        yield put({ type: 'app/query', payload:{'username': payload.username, 'auth' : data.data} })
+-        if (from && from !== '/login') {
+-          yield put(routerRedux.push(from))
+-        } else {
+-          yield put(routerRedux.push('/dashboard'))
+-        }
+-      } else {
+-        throw data
+-      }
+-    },
+-  },
+-
+-}
+diff --git a/src/router.js b/src/router.js
+index de93e1a..aaad181 100644
+--- a/src/router.js
++++ b/src/router.js
+@@ -24,10 +24,6 @@ const Routers = function ({ history, app }) {
+       models: () => [import('models/manager/securityMgr/subscriber')],
+       component: () => import('./routes/manager/securityMgr/subscriber/'),
+     }, {
+-      path: '/login',
+-      models: () => [import('models/common/login')],
+-      component: () => import('routes/common/login/'),
+-    }, {
+       path: '/roles',
+       models: () => [import('models/manager/securityMgr/roles')],
+       component: () => import('routes/manager/securityMgr/roles/'),
+diff --git a/src/routes/common/login/index.js b/src/routes/common/login/index.js
+deleted file mode 100644
+index d83cb08..0000000
+--- a/src/routes/common/login/index.js
++++ /dev/null
+@@ -1,73 +0,0 @@
+-import React from 'react'
+-import PropTypes from 'prop-types'
+-import { connect } from 'dva'
+-import { Button, Row, Form, Input } from 'antd'
+-import { config } from 'utils'
+-import styles from './index.less'
+-
+-const FormItem = Form.Item
+-
+-const Login = ({
+-  loading,
+-  dispatch,
+-  form: {
+-    getFieldDecorator,
+-    validateFieldsAndScroll,
+-  },
+-}) => {
+-  function handleOk () {
+-    validateFieldsAndScroll((errors, values) => {
+-      if (errors) {
+-        return
+-      }
+-      dispatch({ type: 'login/login', payload: values })
+-    })
+-  }
+-
+-  return (
+-    <div className={styles.form}>
+-      <div className={styles.logo}>
+-        <img alt={'logo'} src={config.logo} />
+-        <span>{config.name}</span>
+-      </div>
+-      <form>
+-        <FormItem hasFeedback>
+-          {getFieldDecorator('username', {
+-            rules: [
+-              {
+-                required: true,
+-              },
+-            ],
+-          })(<Input size="large" onPressEnter={handleOk} placeholder="Username" />)}
+-        </FormItem>
+-        <FormItem hasFeedback>
+-          {getFieldDecorator('password', {
+-            rules: [
+-              {
+-                required: true,
+-              },
+-            ],
+-          })(<Input size="large" type="password" onPressEnter={handleOk} placeholder="Password" />)}
+-        </FormItem>
+-        <Row>
+-          <Button type="primary" size="large" onClick={handleOk} loading={loading.effects.login}>
+-            Sign in
+-          </Button>
+-          <p>
+-            <span>Username：admin</span>
+-            <span>Password：123</span>
+-          </p>
+-        </Row>
+-
+-      </form>
+-    </div>
+-  )
+-}
+-
+-Login.propTypes = {
+-  form: PropTypes.object,
+-  dispatch: PropTypes.func,
+-  loading: PropTypes.object,
+-}
+-
+-export default connect(({ loading }) => ({ loading }))(Form.create()(Login))
+diff --git a/src/routes/common/login/index.less b/src/routes/common/login/index.less
+deleted file mode 100644
+index 1ebd563..0000000
+--- a/src/routes/common/login/index.less
++++ /dev/null
+@@ -1,51 +0,0 @@
+-.form {
+-  position: absolute;
+-  top: 50%;
+-  left: 50%;
+-  margin: -160px 0 0 -160px;
+-  width: 320px;
+-  height: 320px;
+-  padding: 36px;
+-  box-shadow: 0 0 100px rgba(0,0,0,.08);
+-
+-  button {
+-    width: 100%;
+-  }
+-
+-  p {
+-    color: rgb(204, 204, 204);
+-    text-align: center;
+-    margin-top: 16px;
+-
+-    span {
+-      &:first-child {
+-        margin-right: 16px;
+-      }
+-    }
+-  }
+-}
+-
+-.logo {
+-  text-align: center;
+-  height: 40px;
+-  line-height: 40px;
+-  cursor: pointer;
+-  margin-bottom: 24px;
+-
+-  img {
+-    width: 40px;
+-    margin-right: 8px;
+-  }
+-
+-  span {
+-    vertical-align: text-bottom;
+-    font-size: 16px;
+-    text-transform: uppercase;
+-    display: inline-block;
+-  }
+-}
+-
+-.ant-spin-container,
+-.ant-spin-nested-loading {
+-  height: 100%;
+-}
+diff --git a/src/services/common/app.js b/src/services/common/app.js
+index a10c3dd..76fc768 100644
+--- a/src/services/common/app.js
++++ b/src/services/common/app.js
+@@ -1,18 +1,10 @@
+ import { request, config } from 'utils'
+
+-const { api:{ login:{login:userLogin, logout:userLogout}, user:{resources: userResources} } } = config
++const { api:{ user:{resources: userResources, user:userToken} } } = config
+
+-export async function login (params) {
++export async function user (params) {
+   return request({
+-    url: userLogin,
+-    method: 'post',
+-    data: params,
+-  })
+-}
+-
+-export async function logout (params) {
+-  return request({
+-    url: userLogout,
++    url: userToken,
+     method: 'get',
+     data: params,
+   })
+diff --git a/src/services/common/login.js b/src/services/common/login.js
+deleted file mode 100644
+index 3195139..0000000
+--- a/src/services/common/login.js
++++ /dev/null
+@@ -1,11 +0,0 @@
+-import { request, config } from 'utils'
+-
+-const { api:{login:{ login: userLogin }} } = config
+-
+-export async function login (data) {
+-  return request({
+-    url: userLogin,
+-    method: 'post',
+-    data,
+-  })
+-}
+diff --git a/src/utils/config.js b/src/utils/config.js
+index cb5ca8e..03deb32 100644
+--- a/src/utils/config.js
++++ b/src/utils/config.js
+@@ -14,13 +14,17 @@ module.exports = {
+   apiPrefix: MOCK_PFX,
+   MOCK_PFX,
+   APIV2,
++  sso:{
++    enable: true ,
++    loginUrl: 'http://10.8.132.221:8000/login',
++    logoutUrl: 'http://10.8.132.221:8000/logout',
++    // loginUrl: 'http://localhost:8001/login',
++    // logoutUrl: 'http://localhost:8001/logout'
++  },
+   api: {
+-    login: {
+-      login: `${APIV3}/login`,
+-      logout: `${MOCK_PFX}/user/logout`
+-    },
+     user: {
+       users: `${APIV2}/users`,
++      user: `${APIV2}/users/username/token`,
+       resources:`${APIV2}/users/username/:username/resources`
+     },
+     department: {
+diff --git a/src/utils/request.js b/src/utils/request.js
+index f2e2db1..9ac85e6 100644
+--- a/src/utils/request.js
++++ b/src/utils/request.js
+@@ -72,8 +72,8 @@ const fetch = (options) => {
+   //     return axios(options)
+   // }
+   let optionsdeep={};
+-  if(authorization == "Bearer " && window.sessionStorage.getItem("user")){
+-    authorization = "Bearer "+ JSON.parse(window.sessionStorage.getItem("user")).authorization;
++  if(window.sessionStorage.getItem("user")){
++    authorization = "Bearer "+ JSON.parse(window.sessionStorage.getItem("user")).auth;
+   }
+   // const authorization = "Bearer "+ window.sessionStorage.getItem("authorization");
+   if("get"===method){
+diff --git a/src/utils/sysconfig.js b/src/utils/sysconfig.js
+index c27940a..bb7f4d6 100644
+--- a/src/utils/sysconfig.js
++++ b/src/utils/sysconfig.js
+@@ -20,7 +20,7 @@ const callDefConfigSvc = (fn, name) => {
+         fn(name?system_config[name]:system_config);
+       }
+     }, error=>{
+-    console.log(`error [${error}]`)
++    console.log(`error [${JSON.stringify(error)}]`)
+   });
+ }
+
+diff --git a/src/utils/url.js b/src/utils/url.js
+new file mode 100644
+index 0000000..9116ec7
+--- /dev/null
++++ b/src/utils/url.js
+@@ -0,0 +1,9 @@
++/**
++ * Created by liang on 2017/12/7.
++ */
++import qs from 'qs';
++export default {
++  redirect(host, param) {
++    window.location.href=`${host}?${qs.stringify(param)}`;
++  }
++}

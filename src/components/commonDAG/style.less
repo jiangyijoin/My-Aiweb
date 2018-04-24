@@ -1,0 +1,36 @@
+@import "~themes/vars";
+:global {
+  .jtk-endpoint.jtk-endpoint-anchor {
+    z-index: 20001;
+  }
+}
+.dag {
+  :global{
+    .jtk-endpoint.jtk-endpoint-anchor {
+      z-index: 20001;
+    }
+    .anticon:after{
+      position: absolute;
+      right: -24px;
+      top: ~'calc(50% - 9px)';
+      display: block;
+      font-size: 18px;
+      font-family: "anticon" !important;
+      content: ' ';
+    }
+    .success:after{
+      content: '\E631';
+      color: @green-6;
+    }
+    .error:after{
+      content: '\E62F';
+      color: @red-6;
+    }
+    .loading:after{
+      content: '\E6DA';
+      color: @blue-6;
+      animation: loadingCircle 1.5s infinite linear;
+    }
+  }
+}
+

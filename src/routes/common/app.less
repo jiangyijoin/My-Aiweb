@@ -1,0 +1,104 @@
+@import "~themes/default";
+
+@keyframes nprogress-spinner {
+  0% {
+    transform: rotate(0deg);
+  }
+
+  100% {
+    transform: rotate(360deg);
+  }
+}
+.app{
+  :global {
+    .ant-menu-submenu-horizontal:after {
+      content: "\20";
+      display: block;
+      height: 0;
+      clear: both;
+    }
+
+    #nprogress {
+      pointer-events: none;
+
+      .bar {
+        background: @primary-color;
+        position: fixed;
+        z-index: 1024;
+        top: 0;
+        left: 0;
+        right: 0;
+        width: 100%;
+        height: 2px;
+      }
+
+      .peg {
+        display: block;
+        position: absolute;
+        right: 0;
+        width: 100px;
+        height: 100%;
+        box-shadow: 0 0 10px @primary-color,0 0 5px @primary-color;
+        opacity: 1.0;
+        transform: rotate(3deg) translate(0px,-4px);
+      }
+
+      .spinner {
+        display: block;
+        position: fixed;
+        z-index: 1031;
+        top: 15px;
+        right: 15px;
+      }
+
+      .spinner-icon {
+        width: 18px;
+        height: 18px;
+        box-sizing: border-box;
+        border: solid 2px transparent;
+        border-top-color: @primary-color;
+        border-left-color: @primary-color;
+        border-radius: 50%;
+
+        :local {
+          animation: nprogress-spinner 400ms linear infinite;
+        }
+      }
+    }
+
+    .nprogress-custom-parent {
+      overflow: hidden;
+      position: relative;
+
+      #nprogress {
+        .bar,
+        .spinner {
+          position: absolute;
+        }
+      }
+    }
+    .p-menu{
+      position: fixed;
+      width: 100px;
+      height: 100%;
+      background-color: #4d6273;
+
+      .p-icon-menu li {
+        &:hover, &.active {
+          background-color: #1ba4f2;
+        }
+      }
+    }
+    .p-content{
+      position: relative;
+    }
+    .normalScreen{
+      left: 100px;
+      width: ~'calc(100% - 100px)';
+    }
+    .fullScreen{
+      left: 0;
+      width: 100%;
+    }
+  }
+}

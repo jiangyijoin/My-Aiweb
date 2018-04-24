@@ -1,0 +1,30 @@
+//@primary-color: #37a52c;
+@import "./vars";
+
+@primary-color: #1890ff;
+@link-color: #5bb7c3;
+
+/* 设置使用字体的优先级 iconfont 高 */
+:global(.anticon.iconfont) {
+  &:before{
+    font-family: "iconfont" !important;
+  }
+}
+:global{
+  .text-overflow {
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+  }
+
+  .fl{float: left;}
+  .fr{float: right;}
+  .clear:after {
+    content: "\0020";
+    display: block;
+    height: 0;
+    clear: both;
+  }
+  .hide{display: none!important;}
+}
+
